@@ -71,6 +71,7 @@ module = [
     "zstandard",
     "selectolax.*",
     "ahocorasick",
+    "cloudpickle",
 ]
 ignore_missing_imports = true
 

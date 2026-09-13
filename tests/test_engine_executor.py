@@ -7,7 +7,6 @@ import orjson
 
 from bulk_http.config import EngineConfig
 from bulk_http.engine import ControlMessage, InProcessExecutor
-from bulk_http.metrics import MetricsCollector
 from bulk_http.models import Request, Task
 from bulk_http.net import FakeTransport, RawResponse
 
@@ -53,19 +52,19 @@ def test_executor_offset_is_durable_and_grows(tmp_path: Path) -> None:
     assert messages[0].offset < messages[1].offset
 
 
-def test_executor_records_metrics_for_all_results(tmp_path: Path) -> None:
-    metrics = MetricsCollector()
+def test_executor_reports_batch_stats_for_all_results(tmp_path: Path) -> None:
     executor = InProcessExecutor(
         EngineConfig(),
         tmp_path,
         transport_factory=_factory(b"nope"),
-        metrics=metrics,
     )
+    messages: list[ControlMessage] = []
     batches = [_batch(0, ["https://a.com", "https://b.com"], needles=("admin",))]
-    executor.execute(iter(batches), lambda m: None)
-    snap = metrics.snapshot()
-    assert snap.total == 2
-    assert snap.matched == 0  # needle absent
+    executor.execute(iter(batches), messages.append)
+    stats = messages[0].stats
+    assert stats.total == 2
+    assert stats.matched == 0  # needle absent
+    assert stats.by_status == {200: 2}
 
 
 def test_executor_only_writes_matched(tmp_path: Path) -> None:

@@ -9,7 +9,7 @@ from bulk_http.concurrency.processor import ProxyProvider, RateLimiter, TaskProc
 from bulk_http.concurrency.sizing import run
 from bulk_http.engine.control import ControlMessage
 from bulk_http.evaluate import Predicate
-from bulk_http.metrics import MetricsCollector
+from bulk_http.metrics import compute_batch_stats
 from bulk_http.models import Task
 from bulk_http.net.transport import Transport
 from bulk_http.sinks import NdjsonWorkerSink
@@ -23,7 +23,7 @@ class InProcessExecutor:
     """Execute batches in the current process on one event loop and transport.
 
     Validated (matched) results are written to a single per-run NDJSON file;
-    every result feeds the optional metrics collector. After each batch the file
+    Each batch also reports compact statistics in its control message. After each batch the file
     is committed (flush+fsync) and a :class:`ControlMessage` is delivered.
     """
 
@@ -36,7 +36,6 @@ class InProcessExecutor:
         predicate: Predicate | None = None,
         proxy_pool: ProxyProvider | None = None,
         rate_limiter: RateLimiter | None = None,
-        metrics: MetricsCollector | None = None,
         os_name: str | None = None,
         filename: str = "worker-inproc.ndjson",
     ) -> None:
@@ -46,7 +45,6 @@ class InProcessExecutor:
         self._predicate = predicate
         self._proxy_pool = proxy_pool
         self._rate_limiter = rate_limiter
-        self._metrics = metrics
         self._os_name = os_name
         self._filename = filename
 
@@ -69,13 +67,12 @@ class InProcessExecutor:
                     results = await processor.run_batch(batch)
                     count = 0
                     for result in results:
-                        if self._metrics is not None:
-                            self._metrics.record(result)
                         if result.matched:
                             sink.write(result)
                             count += 1
                     offset = sink.commit()
-                    on_control(ControlMessage(chunk_id, self._filename, offset, count))
+                    stats = compute_batch_stats(results)
+                    on_control(ControlMessage(chunk_id, self._filename, offset, count, stats))
             finally:
                 sink.close()
                 aclose = getattr(transport, "aclose", None)

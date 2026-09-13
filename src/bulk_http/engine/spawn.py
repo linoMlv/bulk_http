@@ -14,6 +14,7 @@ from bulk_http.concurrency.processor import TaskProcessor
 from bulk_http.concurrency.sizing import run
 from bulk_http.engine.control import ControlMessage
 from bulk_http.evaluate import Predicate
+from bulk_http.metrics import compute_batch_stats
 from bulk_http.models import Task
 from bulk_http.net.transport import Transport
 from bulk_http.proxies import DomainRateLimiter, ProxyPool
@@ -84,7 +85,8 @@ def _spawn_run_batch(item: Batch) -> ControlMessage:
             sink.write(result)
             count += 1
     offset = sink.commit()
-    return ControlMessage(chunk_id, state["filename"], offset, count)
+    stats = compute_batch_stats(results)
+    return ControlMessage(chunk_id, state["filename"], offset, count, stats)
 
 
 class SpawnExecutor:

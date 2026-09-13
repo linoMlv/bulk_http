@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from bulk_http.metrics.batch import BatchStats
 from bulk_http.models import Result
 
 Clock = Callable[[], float]
@@ -87,6 +88,17 @@ class MetricsCollector:
             self._errors[result.error] += 1
         if result.elapsed is not None:
             self._sample_latency(result.elapsed)
+
+    def merge(self, stats: BatchStats) -> None:
+        """Fold an already-computed batch summary into the running totals."""
+        self._total += stats.total
+        self._matched += stats.matched
+        for status, count in stats.by_status.items():
+            self._by_status[status] += count
+        for error, count in stats.errors.items():
+            self._errors[error] += count
+        for value in stats.latencies:
+            self._sample_latency(value)
 
     def _sample_latency(self, value: float) -> None:
         self._latency_seen += 1

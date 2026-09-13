@@ -13,6 +13,7 @@ from bulk_http.concurrency.chunking import chunk_batches
 from bulk_http.config import EngineConfig
 from bulk_http.engine.control import ControlMessage
 from bulk_http.evaluate import Predicate
+from bulk_http.metrics import MetricsCollector, MetricsSnapshot
 from bulk_http.models import Task
 
 Batch = tuple[int, list[Task]]
@@ -32,6 +33,7 @@ class RunSummary:
     skipped: int
     out_dir: str
     checkpoint: str | None
+    metrics: MetricsSnapshot | None = None
 
 
 class Engine:
@@ -141,9 +143,11 @@ class Engine:
         needle: str | None = None,
         proxies: list[str] | None = None,
         executor: Executor | None = None,
+        metrics_callback: Callable[[MetricsSnapshot], None] | None = None,
     ) -> RunSummary:
         compliance = self._compliance()
         counter = {"skipped": 0, "matched": 0, "chunks": 0}
+        metrics = MetricsCollector()
         store = CheckpointStore(self._config.checkpoint) if self._config.checkpoint else None
         committed: set[int] = set()
         if store is not None:
@@ -165,6 +169,7 @@ class Engine:
         def on_control(message: ControlMessage) -> None:
             counter["matched"] += message.count
             counter["chunks"] += 1
+            metrics.merge(message.stats)
             if store is not None:
                 store.commit_chunk(
                     message.chunk_id, message.worker_file, message.offset, message.count
@@ -176,12 +181,16 @@ class Engine:
         finally:
             if store is not None:
                 store.close()
+        snapshot = metrics.snapshot()
+        if metrics_callback is not None:
+            metrics_callback(snapshot)
         return RunSummary(
             chunks=counter["chunks"],
             matched=counter["matched"],
             skipped=counter["skipped"],
             out_dir=str(out_dir),
             checkpoint=self._config.checkpoint,
+            metrics=snapshot,
         )
 
     def _resume(self, store: CheckpointStore, out_dir: str | os.PathLike[str]) -> set[int]:

@@ -120,3 +120,32 @@ def test_engine_builds_config_from_kwargs() -> None:
     engine = Engine(chunk_size=7, impersonate="firefox")
     assert engine.config.chunk_size == 7
     assert engine.config.impersonate == "firefox"
+
+
+def test_run_summary_exposes_metrics(tmp_path: Path) -> None:
+    config = EngineConfig(chunk_size=2)
+    summary = Engine(config).run(
+        sources.memory(["https://a.com", "https://b.com", "https://c.com"]),
+        needle="admin",
+        out_dir=tmp_path,
+        executor=_executor(config, tmp_path),
+    )
+    assert summary.metrics is not None
+    assert summary.metrics.total == 3
+    assert summary.metrics.matched == 3
+    assert summary.metrics.by_status == {200: 3}
+
+
+def test_run_invokes_metrics_callback(tmp_path: Path) -> None:
+    from bulk_http.metrics import MetricsSnapshot
+
+    seen: list[MetricsSnapshot] = []
+    config = EngineConfig(chunk_size=10)
+    Engine(config).run(
+        sources.memory(["https://a.com"]),
+        out_dir=tmp_path,
+        executor=_executor(config, tmp_path, fragment=b"ok"),
+        metrics_callback=seen.append,
+    )
+    assert len(seen) == 1
+    assert seen[0].total == 1

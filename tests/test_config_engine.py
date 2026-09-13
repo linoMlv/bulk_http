@@ -54,3 +54,22 @@ def test_engine_config_is_picklable() -> None:
 def test_engine_config_rejects_invalid_values(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         EngineConfig(**kwargs)  # type: ignore[arg-type]
+
+
+def test_engine_config_compliance_defaults() -> None:
+    cfg = EngineConfig()
+    assert cfg.allowlist == ()
+    assert cfg.denylist == ()
+    assert cfg.identity_header is None
+    assert cfg.authorization is None
+
+
+def test_engine_config_accepts_compliance_options() -> None:
+    cfg = EngineConfig(
+        allowlist=("ok.com",),
+        denylist=("bad.com",),
+        identity_header=("X-Contact", "team@example.com"),
+        authorization="scope #1",
+    )
+    assert cfg.denylist == ("bad.com",)
+    assert cfg.identity_header == ("X-Contact", "team@example.com")

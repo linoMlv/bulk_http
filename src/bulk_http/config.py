@@ -92,6 +92,10 @@ class EngineConfig:
     # Compliance guardrails.
     respect_robots: bool = False
     per_domain_rate_limit: float | None = None
+    allowlist: tuple[str, ...] = ()
+    denylist: tuple[str, ...] = ()
+    identity_header: tuple[str, str] | None = None
+    authorization: str | None = None
 
     # Persistence.
     checkpoint: str | None = None

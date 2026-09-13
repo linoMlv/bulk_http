@@ -79,3 +79,23 @@ def test_brotli_corrupt_data_is_tolerated_not_raised() -> None:
     # Invalid brotli bytes must not raise: the decoder stops and returns what it has.
     out = decompress_fragment(b"\xff\xfe\xfd\xfc" * 64, "br")
     assert isinstance(out, bytes)
+
+
+def test_zstd_full_round_trip() -> None:
+    import zstandard
+
+    comp = zstandard.ZstdCompressor().compress(CONTENT)
+    assert decompress_fragment(comp, "zstd") == CONTENT
+
+
+def test_zstd_truncated_is_tolerant_and_prefix() -> None:
+    import zstandard
+
+    comp = zstandard.ZstdCompressor().compress(VARIED)
+    out = decompress_fragment(comp[: len(comp) * 3 // 4], "zstd")
+    assert VARIED.startswith(out)
+
+
+def test_zstd_corrupt_data_is_tolerated_not_raised() -> None:
+    out = decompress_fragment(b"not-a-valid-zstd-frame" * 4, "zstd")
+    assert isinstance(out, bytes)

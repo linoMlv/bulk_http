@@ -12,6 +12,7 @@ import zlib
 from collections.abc import Callable
 
 import brotli
+import zstandard
 
 _CHUNK = 8192
 
@@ -50,11 +51,23 @@ def _brotli(data: bytes) -> bytes:
     return bytes(out)
 
 
+def _zstd(data: bytes) -> bytes:
+    decompressor = zstandard.ZstdDecompressor().decompressobj()
+    out = bytearray()
+    for start in range(0, len(data), _CHUNK):
+        try:
+            out += decompressor.decompress(data[start : start + _CHUNK])
+        except zstandard.ZstdError:
+            break
+    return bytes(out)
+
+
 _DECODERS: dict[str, Callable[[bytes], bytes]] = {
     "gzip": _gzip,
     "x-gzip": _gzip,
     "deflate": _deflate,
     "br": _brotli,
+    "zstd": _zstd,
 }
 
 

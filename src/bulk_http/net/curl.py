@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import time
+from functools import lru_cache
 from types import TracebackType
 from typing import Any
 
-from curl_cffi import CurlError
+from curl_cffi import Curl, CurlError
 from curl_cffi.const import CurlHttpVersion
 from curl_cffi.requests import AsyncSession
 
@@ -25,6 +26,23 @@ _HTTP_VERSION_MAP: dict[HttpVersion, CurlHttpVersion | None] = {
     "h2": CurlHttpVersion.V2_0,
     "h3": CurlHttpVersion.V3,
 }
+
+
+@lru_cache(maxsize=1)
+def http3_available() -> bool:
+    """Whether this libcurl build supports HTTP/3 (QUIC).
+
+    Detected from the libcurl version string; HTTP/3 needs a QUIC backend
+    (ngtcp2/nghttp3 or quiche) compiled in. Note that even when available, h3
+    proxying requires a UDP-capable proxy (SOCKS5 UDP ASSOCIATE), rarely offered
+    by residential pools.
+    """
+    try:
+        raw = Curl().version()
+    except Exception:  # pragma: no cover - defensive
+        return False
+    text = raw.decode() if isinstance(raw, bytes) else str(raw)
+    return any(token in text for token in ("nghttp3", "ngtcp2", "quiche"))
 
 
 class CurlTransport:
@@ -74,6 +92,13 @@ class CurlTransport:
 
     async def perform(self, resolved: ResolvedRequest) -> RawResponse:
         start = time.monotonic()
+        if resolved.http_version == "h3" and not http3_available():
+            return RawResponse(
+                status=None,
+                url=resolved.url,
+                error="http3_unavailable",
+                elapsed=time.monotonic() - start,
+            )
         try:
             if resolved.fast_status:
                 return await self._perform_fast_status(resolved, start)

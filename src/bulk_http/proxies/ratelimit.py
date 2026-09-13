@@ -36,7 +36,9 @@ class DomainRateLimiter:
         now = self._clock()
         earliest = self._next.get(domain, 0.0)
         start = max(now, earliest)
+        # Reserve this slot before sleeping so concurrent acquires on the same
+        # domain each get a distinct slot instead of all reading the same value.
+        self._next[domain] = start + self._interval
         wait = start - now
         if wait > 0:
             await self._sleep(wait)
-        self._next[domain] = start + self._interval

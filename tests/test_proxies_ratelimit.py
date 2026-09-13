@@ -61,3 +61,27 @@ async def test_sustained_rate_spaces_requests() -> None:
 def test_invalid_rate_rejected() -> None:
     with pytest.raises(ValueError):
         DomainRateLimiter(0.0)
+
+
+class FrozenClock:
+    def __init__(self) -> None:
+        self.waits: list[float] = []
+
+    def time(self) -> float:
+        return 0.0
+
+    async def sleep(self, delay: float) -> None:
+        import asyncio
+
+        self.waits.append(delay)
+        await asyncio.sleep(0)  # yield to the loop so other coroutines interleave
+
+
+async def test_concurrent_acquires_are_serialized() -> None:
+    import asyncio
+
+    clock = FrozenClock()
+    limiter = DomainRateLimiter(10.0, clock=clock.time, sleep=clock.sleep)  # 0.1s interval
+    # Five coroutines hitting the same domain at once must each get a distinct slot.
+    await asyncio.gather(*(limiter.acquire("a.com") for _ in range(5)))
+    assert clock.waits == pytest.approx([0.1, 0.2, 0.3, 0.4])

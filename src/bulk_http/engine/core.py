@@ -87,14 +87,32 @@ class Engine:
     def _default_executor(
         self, out_dir: str | os.PathLike[str], predicate: Predicate | None
     ) -> Executor:
+        import platform
+        import sys
+
+        from bulk_http.concurrency.sizing import resolve_workers
         from bulk_http.engine.executor import InProcessExecutor
+        from bulk_http.engine.spawn import SpawnExecutor
         from bulk_http.net.curl import CurlTransport
 
-        return InProcessExecutor(
+        os_name = "windows" if sys.platform.startswith("win") else platform.system().lower()
+        workers = resolve_workers(self._config.workers, os_name=os_name, cpu_count=os.cpu_count())
+
+        def factory() -> CurlTransport:
+            return CurlTransport()
+
+        if workers <= 1:
+            return InProcessExecutor(
+                self._config, out_dir, transport_factory=factory, predicate=predicate
+            )
+        return SpawnExecutor(
             self._config,
             out_dir,
-            transport_factory=lambda: CurlTransport(),
+            transport_factory=factory,
             predicate=predicate,
+            workers=workers,
+            in_flight_batches=self._config.in_flight_batches,
+            max_tasks_per_child=self._config.max_tasks_per_child,
         )
 
     def run(

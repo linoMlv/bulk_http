@@ -6,6 +6,7 @@ crash-safe resumption. The public API is progressively assembled across releases
 """
 
 from bulk_http import sinks, sources
+from bulk_http.config import EngineConfig
 from bulk_http.engine import Engine, RunSummary
 from bulk_http.models import Request, Result
 
@@ -13,6 +14,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Engine",
+    "EngineConfig",
     "Request",
     "Result",
     "RunSummary",

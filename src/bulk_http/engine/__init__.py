@@ -5,5 +5,13 @@ from __future__ import annotations
 from bulk_http.engine.control import ControlMessage
 from bulk_http.engine.core import Engine, Executor, RunSummary
 from bulk_http.engine.executor import InProcessExecutor
+from bulk_http.engine.spawn import SpawnExecutor
 
-__all__ = ["ControlMessage", "Engine", "Executor", "InProcessExecutor", "RunSummary"]
+__all__ = [
+    "ControlMessage",
+    "Engine",
+    "Executor",
+    "InProcessExecutor",
+    "RunSummary",
+    "SpawnExecutor",
+]

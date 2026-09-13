@@ -20,8 +20,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   backpressure and worker recycling; OS-appropriate event loop selection.
 - Crash-safe output: per-worker NDJSON with transactional per-batch checkpointing
   and exactly-once resume, plus CSV export.
-- Observability metrics and responsible-use guardrails (allow/deny lists,
-  identity header, authorization note, robots.txt support).
+- Observability: campaign metrics aggregated across workers (throughput, latency
+  percentiles, status distribution, error counts), exposed on `RunSummary.metrics`
+  and via a `metrics_callback`.
+- Responsible-use guardrails: allow/deny lists, identity header, authorization
+  note, per-domain rate limiting, and enforced `robots.txt` (`respect_robots`,
+  off by default) with crawl-delay.
+- Per-URL `total_timeout` budget spanning retries and backoffs.
 - Opt-in HTTP/3 (availability-detected) and an opt-in winloop path.
 
 [0.1.0]: https://github.com/linoMlv/bulk_http/releases/tag/v0.1.0

@@ -119,6 +119,24 @@ engine.run(source, out_dir="out")  # …and re-run to resume exactly once
 
 Convert the NDJSON to CSV at the end with `bulk_http.sinks.export_csv`.
 
+## Metrics
+
+`run` returns a `RunSummary` whose `metrics` field aggregates the campaign across
+all workers — total, match count, status distribution, error counts and latency
+percentiles (p50/p95/p99) — with bounded memory. Pass `metrics_callback=` to
+receive the snapshot at the end of the run:
+
+```python
+summary = engine.run(source, metrics_callback=lambda m: print(m.as_dict()))
+print(summary.metrics.p95, summary.metrics.by_status)
+```
+
+## Timeouts
+
+`timeout` bounds a single attempt; `total_timeout` bounds the whole per-URL
+budget (attempts plus backoffs) — once the deadline would be crossed, no further
+attempt or backoff is started.
+
 ## Responsible use
 
 `bulk_http` is intended for use within an authorised scope (assets you own,
@@ -129,7 +147,9 @@ provides the technical means for compliant use:
 - `per_domain_rate_limit=` requests per second per host.
 - `identity_header=("X-Contact", "you@example.com")` for a contactable scan.
 - `authorization="scope reference"` attached to every output record.
-- `bulk_http.compliance.RobotsCache` for `robots.txt` rules and crawl-delay.
+- `respect_robots=True` — enforce `robots.txt` per host (disallowed URLs are
+  skipped with a `robots_disallowed` result) and honour its crawl-delay.
+  Disabled by default.
 
 Legal responsibility for how the library is used rests with the user.
 

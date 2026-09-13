@@ -104,6 +104,9 @@ class TaskProcessor:
         outcome = classify_outcome(response)
         if proxy is not None and self._proxy_pool is not None:
             self._proxy_pool.report(proxy, outcome, now=self._clock())
+        recorder = getattr(self._rate_limiter, "record", None)
+        if recorder is not None:
+            recorder(_domain(resolved.url), outcome)
         if response.error is not None:
             matched = False
         else:

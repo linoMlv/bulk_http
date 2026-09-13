@@ -58,3 +58,24 @@ def test_encoding_is_case_insensitive_and_trimmed() -> None:
 def test_multi_encoding_with_identity_step_is_skipped() -> None:
     # "gzip, identity" means: identity applied last (no-op), then gzip undone.
     assert decompress_fragment(gzip.compress(CONTENT), "gzip, identity") == CONTENT
+
+
+def test_brotli_full_round_trip() -> None:
+    import brotli
+
+    assert decompress_fragment(brotli.compress(CONTENT), "br") == CONTENT
+
+
+def test_brotli_truncated_is_tolerant_and_prefix() -> None:
+    import brotli
+
+    comp = brotli.compress(VARIED)
+    out = decompress_fragment(comp[: len(comp) * 3 // 4], "br")
+    # May be empty for a single meta-block, but must never raise and stays a prefix.
+    assert VARIED.startswith(out)
+
+
+def test_brotli_corrupt_data_is_tolerated_not_raised() -> None:
+    # Invalid brotli bytes must not raise: the decoder stops and returns what it has.
+    out = decompress_fragment(b"\xff\xfe\xfd\xfc" * 64, "br")
+    assert isinstance(out, bytes)

@@ -11,6 +11,8 @@ from __future__ import annotations
 import zlib
 from collections.abc import Callable
 
+import brotli
+
 _CHUNK = 8192
 
 
@@ -37,10 +39,22 @@ def _deflate(data: bytes) -> bytes:
     return _inflate(data, -zlib.MAX_WBITS)
 
 
+def _brotli(data: bytes) -> bytes:
+    decompressor = brotli.Decompressor()
+    out = bytearray()
+    for start in range(0, len(data), _CHUNK):
+        try:
+            out += decompressor.process(data[start : start + _CHUNK])
+        except brotli.error:
+            break
+    return bytes(out)
+
+
 _DECODERS: dict[str, Callable[[bytes], bytes]] = {
     "gzip": _gzip,
     "x-gzip": _gzip,
     "deflate": _deflate,
+    "br": _brotli,
 }
 
 

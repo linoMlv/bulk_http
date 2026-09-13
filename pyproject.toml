@@ -65,6 +65,17 @@ strict = true
 files = ["src", "tests"]
 warn_unused_configs = true
 
+[[tool.mypy.overrides]]
+module = [
+    "brotli",
+    "zstandard",
+    "selectolax.*",
+    "curl_cffi.*",
+    "ahocorasick",
+    "cloudpickle",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q"

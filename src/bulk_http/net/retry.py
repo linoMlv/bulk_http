@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from collections.abc import Awaitable, Callable
 
 from bulk_http.config import ResolvedRequest
@@ -11,6 +12,7 @@ from bulk_http.net.transport import RawResponse, Transport
 
 Sleep = Callable[[float], Awaitable[None]]
 Jitter = Callable[[], float]
+Clock = Callable[[], float]
 
 
 def _is_transient(response: RawResponse) -> bool:
@@ -26,15 +28,19 @@ async def perform_with_retries(
     backoff_cap: float = 10.0,
     sleep: Sleep = asyncio.sleep,
     jitter: Jitter = random.random,
+    clock: Clock = time.monotonic,
 ) -> RawResponse:
     """Perform ``resolved`` through ``transport``, retrying transient failures.
 
     Transport errors and 429 responses are retried only for idempotent methods
     (or when ``retry_non_idempotent`` is set), up to ``resolved.retries`` extra
     attempts, with exponential backoff (capped) plus jitter. Other outcomes —
-    including 4xx and 5xx statuses — are returned as-is.
+    including 4xx and 5xx statuses — are returned as-is. ``resolved.total_timeout``
+    bounds the whole per-URL budget (attempts plus backoffs): once the deadline is
+    reached no further attempt or backoff is started.
     """
     replayable = resolved.is_idempotent or resolved.retry_non_idempotent
+    deadline = clock() + resolved.total_timeout if resolved.total_timeout is not None else None
     last: RawResponse | None = None
     for attempt in range(resolved.retries + 1):
         response = await transport.perform(resolved)
@@ -46,6 +52,8 @@ async def perform_with_retries(
         if attempt == resolved.retries:
             return response
         delay = min(backoff_cap, backoff_base * (2**attempt)) + jitter() * backoff_base
+        if deadline is not None and clock() + delay >= deadline:
+            return response
         await sleep(delay)
     assert last is not None  # pragma: no cover - loop always returns
     return last  # pragma: no cover

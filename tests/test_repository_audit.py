@@ -22,7 +22,17 @@ def test_no_planning_or_memory_artifacts_are_tracked() -> None:
 
 def test_no_internal_references_in_tracked_content() -> None:
     result = subprocess.run(
-        ["git", "grep", "-In", "-iE", FORBIDDEN, "--", ".", ":!.gitignore"],
+        [
+            "git",
+            "grep",
+            "-In",
+            "-iE",
+            FORBIDDEN,
+            "--",
+            ".",
+            ":!.gitignore",
+            ":!tests/test_repository_audit.py",
+        ],
         cwd=REPO,
         capture_output=True,
         text=True,

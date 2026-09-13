@@ -70,9 +70,7 @@ module = [
     "brotli",
     "zstandard",
     "selectolax.*",
-    "curl_cffi.*",
     "ahocorasick",
-    "cloudpickle",
 ]
 ignore_missing_imports = true
 

@@ -6,6 +6,7 @@ from bulk_http.sources.base import BaseSource
 from bulk_http.sources.csv import csv, tsv
 from bulk_http.sources.json import json
 from bulk_http.sources.memory import memory
+from bulk_http.sources.proxy_pool import proxy_pool
 from bulk_http.sources.text import text
 
-__all__ = ["BaseSource", "csv", "json", "memory", "text", "tsv"]
+__all__ = ["BaseSource", "csv", "json", "memory", "proxy_pool", "text", "tsv"]

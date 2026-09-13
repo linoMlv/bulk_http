@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterable
 from bulk_http.concurrency.processor import ProxyProvider, RateLimiter, TaskProcessor
 from bulk_http.concurrency.sizing import run
 from bulk_http.engine.control import ControlMessage
+from bulk_http.engine.robots_support import make_robots_gate
 from bulk_http.evaluate import Predicate
 from bulk_http.metrics import compute_batch_stats
 from bulk_http.models import Task
@@ -60,6 +61,7 @@ class InProcessExecutor:
                 predicate=self._predicate,
                 proxy_pool=self._proxy_pool,
                 rate_limiter=self._rate_limiter,
+                robots=make_robots_gate(self._config, transport),  # type: ignore[arg-type]
             )
             sink = NdjsonWorkerSink(path)
             try:

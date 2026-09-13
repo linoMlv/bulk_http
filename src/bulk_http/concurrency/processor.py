@@ -31,6 +31,11 @@ class RateLimiter(Protocol):
     async def acquire(self, domain: str) -> None: ...
 
 
+class RobotsGate(Protocol):
+    async def allowed(self, url: str) -> bool: ...
+    async def throttle(self, url: str) -> None: ...
+
+
 def _domain(url: str) -> str:
     return urlsplit(url).hostname or ""
 
@@ -53,6 +58,7 @@ class TaskProcessor:
         concurrency: int | None = None,
         proxy_pool: ProxyProvider | None = None,
         rate_limiter: RateLimiter | None = None,
+        robots: RobotsGate | None = None,
         clock: Clock = time.monotonic,
         sleep: Sleep = asyncio.sleep,
         jitter: Jitter = random.random,
@@ -63,6 +69,7 @@ class TaskProcessor:
         self._concurrency = concurrency or config.concurrency_per_worker
         self._proxy_pool = proxy_pool
         self._rate_limiter = rate_limiter
+        self._robots = robots
         self._clock = clock
         self._sleep = sleep
         self._jitter = jitter
@@ -77,6 +84,17 @@ class TaskProcessor:
 
     async def process(self, task: Task) -> Result:
         resolved = self._config.effective(task.request)
+        if self._robots is not None:
+            if not await self._robots.allowed(resolved.url):
+                return Result(
+                    source_id=task.source_id,
+                    url=resolved.url,
+                    status=None,
+                    matched=False,
+                    meta=resolved.meta,
+                    error="robots_disallowed",
+                )
+            await self._robots.throttle(resolved.url)
         resolved, proxy = self._apply_proxy(resolved)
         if self._rate_limiter is not None:
             await self._rate_limiter.acquire(_domain(resolved.url))

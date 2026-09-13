@@ -119,6 +119,9 @@ class _Handler(BaseHTTPRequestHandler):
                     {"Content-Encoding": coding},
                 )
             return
+        if head == "robots.txt":
+            self._send(200, b"User-agent: *\nDisallow: /secret\n", "text/plain")
+            return
         if head == "head-405":
             self._send(200, b"ok")
             return

@@ -13,6 +13,7 @@ import cloudpickle
 from bulk_http.concurrency.processor import TaskProcessor
 from bulk_http.concurrency.sizing import run
 from bulk_http.engine.control import ControlMessage
+from bulk_http.engine.robots_support import make_robots_gate
 from bulk_http.evaluate import Predicate
 from bulk_http.metrics import compute_batch_stats
 from bulk_http.models import Task
@@ -69,6 +70,7 @@ def _spawn_run_batch(item: Batch) -> ControlMessage:
             predicate=state["predicate"],
             proxy_pool=state["proxy_pool"],
             rate_limiter=state["rate_limiter"],
+            robots=make_robots_gate(state["config"], transport),
         )
         try:
             return await processor.run_batch(batch)

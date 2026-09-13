@@ -100,7 +100,7 @@ def test_spawn_run_batch_reuses_sink_and_closes_transport(tmp_path: Path) -> Non
         os_name="linux",
     )
     first = spawn_mod._spawn_run_batch(_batch(0, 1))
-    second = spawn_mod._spawn_run_batch(_batch(1, 1))  # reuses the same sink
+    second = spawn_mod._spawn_run_batch(_batch(1, 1, "absent-needle"))  # reuses sink, no match
     assert first.worker_file == second.worker_file
     assert closed == [True, True]
     spawn_mod._SPAWN_STATE.clear()

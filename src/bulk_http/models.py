@@ -75,3 +75,20 @@ class Request:
             raise ValueError("total_timeout must be > 0")
         if self.retries is not None and self.retries < 0:
             raise ValueError("retries must be >= 0")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Task:
+    """A request paired with its source-line identity.
+
+    ``source_id`` is the idempotency key (the position of the row in the input
+    source). Tasks are the units distributed to worker processes, so they must
+    remain picklable under the ``spawn`` start method.
+    """
+
+    source_id: int
+    request: Request
+
+    def __post_init__(self) -> None:
+        if self.source_id < 0:
+            raise ValueError("source_id must be >= 0")

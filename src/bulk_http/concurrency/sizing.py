@@ -40,13 +40,26 @@ def resolve_workers(workers: int | Literal["auto"], *, os_name: str, cpu_count: 
     return workers
 
 
-def choose_loop(os_name: str, *, uvloop_available: bool) -> str:
+def choose_loop(
+    os_name: str,
+    *,
+    uvloop_available: bool,
+    winloop_available: bool = False,
+    prefer_winloop: bool = False,
+) -> str:
     """Pick the event-loop implementation for ``os_name``.
 
-    Windows must use the SelectorEventLoop (the ProactorEventLoop cannot drive
-    libcurl's external descriptors); POSIX prefers uvloop when available.
+    Windows must use the SelectorEventLoop by default (the ProactorEventLoop
+    cannot drive libcurl's external descriptors); POSIX prefers uvloop when
+    available. ``winloop`` is an opt-in Windows accelerator that must be validated
+    on Windows before use — it is only chosen when both available and explicitly
+    preferred, and the reliable Selector path stays the default. (A ``curl_multi_poll``
+    thread is another possible high-concurrency Windows accelerator, left
+    unintegrated pending a Windows spike.)
     """
     if os_name == "windows":
+        if winloop_available and prefer_winloop:
+            return "winloop"
         return "selector"
     if uvloop_available:
         return "uvloop"

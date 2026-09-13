@@ -62,3 +62,21 @@ def test_run_executes_coroutine_on_os_loop() -> None:
         return 42
 
     assert run(work()) == 42
+
+
+def test_choose_loop_winloop_opt_in() -> None:
+    # winloop is only chosen on Windows when available AND explicitly preferred.
+    assert (
+        choose_loop("windows", uvloop_available=False, winloop_available=True, prefer_winloop=True)
+        == "winloop"
+    )
+    assert choose_loop("windows", uvloop_available=False, winloop_available=True) == "selector"
+    assert (
+        choose_loop("windows", uvloop_available=False, winloop_available=False, prefer_winloop=True)
+        == "selector"
+    )
+    # winloop preference has no effect off Windows.
+    assert (
+        choose_loop("linux", uvloop_available=True, winloop_available=True, prefer_winloop=True)
+        == "uvloop"
+    )

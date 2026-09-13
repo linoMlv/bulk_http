@@ -3,16 +3,34 @@
 This is test infrastructure, not part of the library's public API. It is a plain
 stdlib server (so it does not depend on the networking core under test) that
 mimics the response shapes real targets produce: status codes, sized bodies,
-header echoing, and — added incrementally — encodings, delays, redirects and
-unhealthy behaviors.
+header echoing, content encodings, delays, redirects and unhealthy behaviors.
 """
 
 from __future__ import annotations
 
+import gzip
 import json
 import threading
+import time
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import TracebackType
+from urllib.parse import parse_qs, urlsplit
+
+import brotli
+import zstandard
+
+
+def _encode(coding: str, body: bytes) -> bytes:
+    if coding == "gzip":
+        return gzip.compress(body)
+    if coding == "deflate":
+        return zlib.compress(body)
+    if coding == "br":
+        return bytes(brotli.compress(body))
+    if coding == "zstd":
+        return zstandard.ZstdCompressor().compress(body)
+    raise ValueError(coding)  # pragma: no cover
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -21,30 +39,68 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args: object) -> None:  # silence test noise
         pass
 
-    def _send(self, code: int, body: bytes = b"", content_type: str = "text/plain") -> None:
+    def _send(
+        self,
+        code: int,
+        body: bytes = b"",
+        content_type: str = "text/plain",
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         if body:
             self.wfile.write(body)
 
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0]
-        parts = [p for p in path.split("/") if p]
+        split = urlsplit(self.path)
+        parts = [p for p in split.path.split("/") if p]
+        query = parse_qs(split.query)
 
         if not parts:
             self._send(200, b"ok")
             return
-        if parts[0] == "status" and len(parts) == 2 and parts[1].isdigit():
+        head = parts[0]
+        if head == "status" and len(parts) == 2 and parts[1].isdigit():
             self._send(int(parts[1]))
             return
-        if parts[0] == "bytes" and len(parts) == 2 and parts[1].isdigit():
+        if head == "bytes" and len(parts) == 2 and parts[1].isdigit():
             self._send(200, b"x" * int(parts[1]), "application/octet-stream")
             return
-        if parts[0] == "headers":
+        if head == "headers":
             received = dict(self.headers.items())
             self._send(200, json.dumps(received).encode(), "application/json")
+            return
+        if head in ("gzip", "deflate", "br", "zstd"):
+            raw = query.get("body", ["ok"])[0].encode()
+            self._send(
+                200,
+                _encode(head, raw),
+                "application/octet-stream",
+                {"Content-Encoding": head},
+            )
+            return
+        if head == "html":
+            title = query.get("title", ["Home"])[0]
+            body = f"<html><head><title>{title}</title></head><body><p>hi</p></body></html>"
+            self._send(200, body.encode(), "text/html; charset=utf-8")
+            return
+        if head == "json":
+            self._send(200, json.dumps({"ok": True}).encode(), "application/json")
+            return
+        if head == "delay" and len(parts) == 2:
+            time.sleep(float(parts[1]))
+            self._send(200, b"ok")
+            return
+        if head == "redirect" and len(parts) == 2 and parts[1].isdigit():
+            remaining = int(parts[1])
+            if remaining <= 0:
+                self._send(200, b"ok")
+            else:
+                self._send(302, b"", extra_headers={"Location": f"/redirect/{remaining - 1}"})
             return
         self._send(404, b"not found")
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from bulk_http._types import (
     ACCEPT_ENCODINGS,
@@ -16,6 +16,9 @@ from bulk_http._types import (
     Method,
 )
 from bulk_http.models import Request
+
+if TYPE_CHECKING:
+    from bulk_http.proxies.adaptive import AdaptiveRateConfig
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -96,6 +99,9 @@ class EngineConfig:
     denylist: tuple[str, ...] = ()
     identity_header: tuple[str, str] | None = None
     authorization: str | None = None
+
+    # Adaptive rate limiting (optional; None keeps the fixed-rate behaviour).
+    adaptive_rate: AdaptiveRateConfig | None = None
 
     # Persistence.
     checkpoint: str | None = None

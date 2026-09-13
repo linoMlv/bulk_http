@@ -97,9 +97,10 @@ class Engine:
 
         from bulk_http.concurrency.sizing import resolve_workers
         from bulk_http.engine.executor import InProcessExecutor
+        from bulk_http.engine.ratelimit_support import build_rate_limiter
         from bulk_http.engine.spawn import SpawnExecutor
         from bulk_http.net.curl import CurlTransport
-        from bulk_http.proxies import DomainRateLimiter, ProxyPool
+        from bulk_http.proxies import ProxyPool
 
         os_name = "windows" if sys.platform.startswith("win") else platform.system().lower()
         workers = resolve_workers(self._config.workers, os_name=os_name, cpu_count=os.cpu_count())
@@ -109,18 +110,13 @@ class Engine:
 
         if workers <= 1:
             pool = ProxyPool(proxies) if proxies else None
-            limiter = (
-                DomainRateLimiter(self._config.per_domain_rate_limit)
-                if self._config.per_domain_rate_limit is not None
-                else None
-            )
             return InProcessExecutor(
                 self._config,
                 out_dir,
                 transport_factory=factory,
                 predicate=predicate,
                 proxy_pool=pool,
-                rate_limiter=limiter,
+                rate_limiter=build_rate_limiter(self._config),
             )
         return SpawnExecutor(
             self._config,
@@ -131,7 +127,6 @@ class Engine:
             in_flight_batches=self._config.in_flight_batches,
             max_tasks_per_child=self._config.max_tasks_per_child,
             proxies=proxies,
-            per_domain_rate_limit=self._config.per_domain_rate_limit,
         )
 
     def run(

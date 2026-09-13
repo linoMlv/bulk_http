@@ -36,4 +36,5 @@ def test_default_spawn_executor_receives_proxies(tmp_path: Path) -> None:
     executor = engine._default_executor(tmp_path, None, proxies=["http://p1:1"])
     assert isinstance(executor, SpawnExecutor)
     assert executor._proxies == ["http://p1:1"]
-    assert executor._per_domain_rate_limit == 2.0
+    # per-domain rate now lives in the config the worker reads, not on the executor.
+    assert engine.config.per_domain_rate_limit == 2.0

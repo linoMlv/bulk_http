@@ -9,10 +9,13 @@ from bulk_http import sinks, sources
 from bulk_http.config import EngineConfig
 from bulk_http.engine import Engine, RunSummary
 from bulk_http.models import Request, Result
+from bulk_http.proxies import AdaptiveRateConfig, BanSuspectedError
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "AdaptiveRateConfig",
+    "BanSuspectedError",
     "Engine",
     "EngineConfig",
     "Request",

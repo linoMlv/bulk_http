@@ -80,6 +80,7 @@ progress is committed to a **checkpoint** so a re-run resumes exactly once.
 ```python
 from bulk_http import Engine, sources
 
+
 def main() -> None:
     engine = Engine(impersonate="chrome")
     summary = engine.run(
@@ -88,6 +89,7 @@ def main() -> None:
         out_dir="out",
     )
     print(summary)  # chunks, matched, skipped, metrics
+
 
 if __name__ == "__main__":
     main()
@@ -107,12 +109,12 @@ Every source streams lazily; the whole input is never loaded at once.
 from bulk_http import sources
 from bulk_http.models import Request
 
-sources.memory(["https://a.com", "https://b.com"])   # URLs…
+sources.memory(["https://a.com", "https://b.com"])  # URLs…
 sources.memory([Request(url="https://a.com", method="POST", body=b"x")])  # …or Request objects
-sources.text("urls.txt")                              # one URL per line
+sources.text("urls.txt")  # one URL per line
 sources.csv("t.csv", mapping={"url": 0, "needle": 1, "keep": [2, 3]})
 sources.tsv("t.tsv", mapping={"url": 0})
-sources.json("t.jsonl")                               # one JSON object per line
+sources.json("t.jsonl")  # one JSON object per line
 ```
 
 **CSV/TSV mapping** links request attributes to zero-based column indices. The
@@ -131,8 +133,14 @@ metadata:
 `Request`:
 
 ```python
-Request(url="https://a.com", method="POST", headers={"X-Api-Key": "…"},
-        body=b'{"q":1}', stream_cut=4096, expected_status=frozenset({200, 201}))
+Request(
+    url="https://a.com",
+    method="POST",
+    headers={"X-Api-Key": "…"},
+    body=b'{"q":1}',
+    stream_cut=4096,
+    expected_status=frozenset({200, 201}),
+)
 ```
 
 ## 6. Filtering responses
@@ -150,7 +158,7 @@ Request(url="https://a.com", expected_status=frozenset({200, 301, 302}))
 **By keyword** (Aho-Corasick over the decompressed body):
 
 ```python
-engine.run(source, needle="Access denied")          # global, applies to all
+engine.run(source, needle="Access denied")  # global, applies to all
 Request(url="https://a.com", needles=("admin", "root"))  # per-URL
 ```
 
@@ -159,8 +167,10 @@ Request(url="https://a.com", needles=("admin", "root"))  # per-URL
 ```python
 from bulk_http.models import EvalContext
 
+
 def is_admin_json(ctx: EvalContext) -> bool:
     return ctx.type == "json" and bool(ctx.data) and ctx.data.get("admin") is True
+
 
 engine.run(source, predicate=is_admin_json)
 ```
@@ -180,8 +190,11 @@ HTML example:
 
 ```python
 def has_login_form(ctx):
-    return ctx.type == "html" and ctx.dom is not None \
+    return (
+        ctx.type == "html"
+        and ctx.dom is not None
         and ctx.dom.css_first("input[type=password]") is not None
+    )
 ```
 
 > The predicate runs in worker processes under `spawn`, so it is serialized with
@@ -193,8 +206,8 @@ def has_login_form(ctx):
 Two ways to avoid downloading full bodies:
 
 ```python
-Engine(fast_status=True)          # abort right after headers (status only)
-Engine(stream_cut=15_000)         # abort once 15 KB have been received
+Engine(fast_status=True)  # abort right after headers (status only)
+Engine(stream_cut=15_000)  # abort once 15 KB have been received
 Engine(stream_cut=15_000, cut_on="decoded")  # 15 KB of *decompressed* content
 ```
 
@@ -211,10 +224,10 @@ near the start of the page.
 
 ```python
 Engine(
-    workers="auto",              # "auto" = CPU count; or an integer
+    workers="auto",  # "auto" = CPU count; or an integer
     concurrency_per_worker=450,  # sockets in flight per worker
-    chunk_size=1000,             # tasks dispatched per batch (500–2000)
-    in_flight_batches=4,         # bounded backpressure
+    chunk_size=1000,  # tasks dispatched per batch (500–2000)
+    in_flight_batches=4,  # bounded backpressure
     max_tasks_per_child=50_000,  # recycle workers to bound leaks
 )
 ```
@@ -248,8 +261,9 @@ Other options:
 Request(url="https://a.com", proxy="http://user:pass@host:port")  # fixed, per request
 
 from bulk_http.proxies import BackconnectGateway
+
 gw = BackconnectGateway("http://user-session-{session}:pass@gw:8000")
-gw.proxy_for("example.com")   # sticky: same upstream IP per key
+gw.proxy_for("example.com")  # sticky: same upstream IP per key
 ```
 
 ## 10. Rate limiting
@@ -269,7 +283,7 @@ empirically. A practical recipe:
 
 ```python
 summary = engine.run(sample_source, out_dir="out")
-print(summary.metrics.by_status)   # e.g. {200: 118, 429: 2}  -> lower the rate
+print(summary.metrics.by_status)  # e.g. {200: 118, 429: 2}  -> lower the rate
 ```
 
 **Why 429 storms happen.** Without a rate limit, high concurrency on a single
@@ -281,13 +295,59 @@ single IP the ceiling is the server's, not the engine's.
 > few transient 429s are retried automatically; a *sustained* 429 rate means the
 > rate is genuinely too high.
 
+### Adaptive rate limiting (optional)
+
+Instead of guessing a fixed value, let the engine find a sustainable rate on its
+own. It is **opt-in** via `adaptive_rate=` and off by default. The algorithm is
+AIMD (like TCP), per domain: the rate nudges **up** after a run of clean
+responses and is **halved** on a 429 or transport error, staying within
+`[min_rate, max_rate]`. Origin statuses (403/5xx) are treated as the target's
+problem and left neutral.
+
+```python
+from bulk_http import Engine, AdaptiveRateConfig
+
+engine = Engine(
+    adaptive_rate=AdaptiveRateConfig(
+        start_rate=10.0,  # req/s per domain to begin with
+        min_rate=1.0,
+        max_rate=50.0,
+        increase_step=1.0,  # +1 req/s ...
+        increase_after=20,  # ... after 20 clean responses in a row
+        decrease_factor=0.5,  # halve on a 429 / transport error
+        ban_window=30,  # sliding window of recent outcomes
+        ban_failures=20,  # failures within it, *while at min_rate*, => ban
+    ),
+)
+```
+
+**Ban detection / stop.** If the rate has already fallen to `min_rate` and
+failures still dominate the window, a real IP ban is likely — continuing would be
+pointless (or harmful). The engine raises `BanSuspectedError`, which stops the
+campaign. Because output is checkpointed, you can fix the situation (rotate IPs,
+wait) and resume:
+
+```python
+from bulk_http import Engine, AdaptiveRateConfig, BanSuspectedError, sources
+
+engine = Engine(adaptive_rate=AdaptiveRateConfig(), checkpoint="campaign.ckpt")
+try:
+    summary = engine.run(sources.text("urls.txt"), out_dir="out")
+except BanSuspectedError:
+    print("stopped: target is banning us — rotate proxies, then re-run to resume")
+```
+
+Adaptive rate combines with retries (§11): a 429 is both retried with backoff and
+used to lower the rate, so the campaign self-tunes toward zero sustained failures.
+Under `spawn`, each worker adapts its own rate independently.
+
 ## 11. Timeouts and retries
 
 ```python
 Engine(
-    timeout=30.0,          # per attempt (connect + read)
-    total_timeout=60.0,    # whole-URL budget, retries + backoffs included
-    retries=2,             # extra attempts for retryable failures
+    timeout=30.0,  # per attempt (connect + read)
+    total_timeout=60.0,  # whole-URL budget, retries + backoffs included
+    retries=2,  # extra attempts for retryable failures
     retry_non_idempotent=False,  # POST/PUT/PATCH/DELETE not retried by default
 )
 ```
@@ -305,8 +365,8 @@ flushed and `fsync`ed.
 
 ```python
 engine = Engine(checkpoint="campaign.ckpt")
-engine.run(source, out_dir="out")   # interrupt any time (Ctrl-C, crash, power loss)
-engine.run(source, out_dir="out")   # re-run: resumes, each row processed once
+engine.run(source, out_dir="out")  # interrupt any time (Ctrl-C, crash, power loss)
+engine.run(source, out_dir="out")  # re-run: resumes, each row processed once
 ```
 
 On resume, partial writes past the last commit are truncated away and only the
@@ -349,12 +409,12 @@ polite and contactable:
 
 ```python
 Engine(
-    respect_robots=True,                                # off by default
+    respect_robots=True,  # off by default
     per_domain_rate_limit=5.0,
     allowlist=("example.com",),
     denylist=("do-not-touch.com",),
     identity_header=("X-Contact", "security@example.com"),
-    authorization="bug-bounty ACME scope #123",         # attached to every output row
+    authorization="bug-bounty ACME scope #123",  # attached to every output row
 )
 ```
 
@@ -387,6 +447,7 @@ from pathlib import Path
 import orjson
 from bulk_http import Engine, Request, sources
 
+
 def main() -> None:
     with open("targets.csv", newline="") as f:
         rows = list(csv.DictReader(f))
@@ -395,7 +456,7 @@ def main() -> None:
     engine = Engine(
         workers=1,
         concurrency_per_worker=32,
-        per_domain_rate_limit=8.0,   # tune per §10
+        per_domain_rate_limit=8.0,  # tune per §10
         stream_cut=16_384,
         retries=6,
         checkpoint="split.ckpt",
@@ -408,15 +469,18 @@ def main() -> None:
     matched = {
         orjson.loads(line)["meta"]["src"]
         for p in Path(out).glob("*.ndjson")
-        for line in p.read_bytes().splitlines() if line.strip()
+        for line in p.read_bytes().splitlines()
+        if line.strip()
     }
     with open("errors.csv", "w", newline="") as fe, open("ok.csv", "w", newline="") as fk:
         we, wk = csv.DictWriter(fe, fieldnames), csv.DictWriter(fk, fieldnames)
-        we.writeheader(); wk.writeheader()
+        we.writeheader()
+        wk.writeheader()
         for r in rows:
             (we if r["URL"] in matched else wk).writerow(r)
 
     print(summary.metrics.by_status, "->", len(matched), "errors")
+
 
 if __name__ == "__main__":
     main()
@@ -440,22 +504,40 @@ from bulk_http import Engine, EngineConfig, Request, Result, sources, sinks
 
 # Engine(**engine_config_fields) or Engine(EngineConfig(...))
 engine = Engine(
-    workers="auto", concurrency_per_worker=450, chunk_size=1000,
-    impersonate="chrome", stream_cut=None, cut_on="wire", fast_status=False,
-    accept_encoding="impersonate", http_version="auto", verify_ssl=True,
-    follow_redirects=False, max_redirects=10, timeout=30.0, total_timeout=None,
-    retries=2, retry_non_idempotent=False,
-    per_domain_rate_limit=None, respect_robots=False,
-    allowlist=(), denylist=(), identity_header=None, authorization=None,
-    max_tasks_per_child=50_000, in_flight_batches=4, checkpoint=None,
+    workers="auto",
+    concurrency_per_worker=450,
+    chunk_size=1000,
+    impersonate="chrome",
+    stream_cut=None,
+    cut_on="wire",
+    fast_status=False,
+    accept_encoding="impersonate",
+    http_version="auto",
+    verify_ssl=True,
+    follow_redirects=False,
+    max_redirects=10,
+    timeout=30.0,
+    total_timeout=None,
+    retries=2,
+    retry_non_idempotent=False,
+    per_domain_rate_limit=None,
+    adaptive_rate=None,  # AdaptiveRateConfig(...) for self-tuning; raises BanSuspectedError
+    respect_robots=False,
+    allowlist=(),
+    denylist=(),
+    identity_header=None,
+    authorization=None,
+    max_tasks_per_child=50_000,
+    in_flight_batches=4,
+    checkpoint=None,
 )
 
 summary = engine.run(
-    source,                 # any sources.* stream
-    predicate=None,         # Callable[[EvalContext], bool]
+    source,  # any sources.* stream
+    predicate=None,  # Callable[[EvalContext], bool]
     out_dir="out",
-    needle=None,            # global keyword
-    proxies=None,           # list[str], e.g. sources.proxy_pool("proxies.txt")
+    needle=None,  # global keyword
+    proxies=None,  # list[str], e.g. sources.proxy_pool("proxies.txt")
     metrics_callback=None,  # Callable[[MetricsSnapshot], None]
 )
 # summary: chunks, matched, skipped, out_dir, checkpoint, metrics

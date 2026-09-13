@@ -10,11 +10,12 @@ from dataclasses import replace
 from typing import Protocol
 from urllib.parse import urlsplit
 
+from bulk_http._types import IDEMPOTENT_METHODS
 from bulk_http.config import EngineConfig, ResolvedRequest
 from bulk_http.evaluate import PatternMatcher, Predicate, evaluate
 from bulk_http.models import Result, Task
 from bulk_http.net.retry import perform_with_retries
-from bulk_http.net.transport import Transport
+from bulk_http.net.transport import RawResponse, Transport
 from bulk_http.proxies.health import Outcome, classify_outcome
 
 Clock = Callable[[], float]
@@ -96,17 +97,7 @@ class TaskProcessor:
                 )
             await self._robots.throttle(resolved.url)
         resolved, proxy = self._apply_proxy(resolved)
-        if self._rate_limiter is not None:
-            await self._rate_limiter.acquire(_domain(resolved.url))
-        response = await perform_with_retries(
-            self._transport, resolved, sleep=self._sleep, jitter=self._jitter
-        )
-        outcome = classify_outcome(response)
-        if proxy is not None and self._proxy_pool is not None:
-            self._proxy_pool.report(proxy, outcome, now=self._clock())
-        recorder = getattr(self._rate_limiter, "record", None)
-        if recorder is not None:
-            recorder(_domain(resolved.url), outcome)
+        response = await self._send(resolved, proxy)
         if response.error is not None:
             matched = False
         else:
@@ -131,6 +122,47 @@ class TaskProcessor:
             elapsed=response.elapsed,
         )
 
+    def _report_proxy(self, proxy: str | None, outcome: Outcome) -> None:
+        if proxy is not None and self._proxy_pool is not None:
+            self._proxy_pool.report(proxy, outcome, now=self._clock())
+
+    async def _send(self, resolved: ResolvedRequest, proxy: str | None) -> RawResponse:
+        recorder = getattr(self._rate_limiter, "record", None)
+        if recorder is None:
+            return await self._send_bounded(resolved, proxy)
+        return await self._send_adaptive(resolved, proxy, recorder)
+
+    async def _send_bounded(self, resolved: ResolvedRequest, proxy: str | None) -> RawResponse:
+        if self._rate_limiter is not None:
+            await self._rate_limiter.acquire(_domain(resolved.url))
+        response = await perform_with_retries(
+            self._transport, resolved, sleep=self._sleep, jitter=self._jitter, clock=self._clock
+        )
+        self._report_proxy(proxy, classify_outcome(response))
+        return response
+
+    async def _send_adaptive(
+        self,
+        resolved: ResolvedRequest,
+        proxy: str | None,
+        recorder: Callable[[str, Outcome], None],
+    ) -> RawResponse:
+        """One attempt, paced by the adaptive limiter, feeding the outcome back.
+
+        A single attempt lets the limiter converge on a sustainable rate; transient
+        failures are not retried here but deferred and replayed by
+        :meth:`run_batch` once the rate has settled. ``recorder`` may raise
+        :class:`BanSuspectedError`.
+        """
+        assert self._rate_limiter is not None
+        domain = _domain(resolved.url)
+        await self._rate_limiter.acquire(domain)
+        response = await self._transport.perform(resolved)
+        outcome = classify_outcome(response)
+        self._report_proxy(proxy, outcome)
+        recorder(domain, outcome)  # may raise BanSuspectedError
+        return response
+
     def _apply_proxy(self, resolved: ResolvedRequest) -> tuple[ResolvedRequest, str | None]:
         if resolved.proxy is not None:
             return resolved, resolved.proxy
@@ -141,7 +173,7 @@ class TaskProcessor:
             return resolved, None
         return replace(resolved, proxy=proxy), proxy
 
-    async def run_batch(self, tasks: Sequence[Task]) -> list[Result]:
+    async def _run_once(self, tasks: Sequence[Task]) -> list[Result]:
         semaphore = asyncio.Semaphore(self._concurrency)
 
         async def guarded(task: Task) -> Result:
@@ -149,3 +181,38 @@ class TaskProcessor:
                 return await self.process(task)
 
         return await asyncio.gather(*(guarded(task) for task in tasks))
+
+    def _should_defer(self, task: Task, result: Result) -> bool:
+        """A transient failure (429/transport) on a replayable method is deferred."""
+        transient = result.status == 429 or result.error is not None
+        replayable = task.request.method in IDEMPOTENT_METHODS or bool(
+            self._config.retry_non_idempotent
+        )
+        return transient and replayable
+
+    async def run_batch(self, tasks: Sequence[Task]) -> list[Result]:
+        """Process a batch; under adaptive limiting, defer transient failures and
+        replay them in later passes once the rate has converged.
+
+        The adaptive path runs a first pass (during which the limiter settles on a
+        sustainable rate), then re-runs the deferred tasks — now correctly paced —
+        until none remain, no progress is made, or the ``max_attempts`` pass budget
+        is exhausted. Without an adaptive limiter, a single pass is run.
+        """
+        if getattr(self._rate_limiter, "record", None) is None:
+            return await self._run_once(tasks)
+
+        max_passes = max(1, int(getattr(self._rate_limiter, "max_attempts", 1)))
+        results: dict[int, Result] = {}
+        pending: list[Task] = list(tasks)
+        for _ in range(max_passes):
+            pass_results = await self._run_once(pending)
+            deferred: list[Task] = []
+            for task, result in zip(pending, pass_results, strict=True):
+                results[task.source_id] = result
+                if self._should_defer(task, result):
+                    deferred.append(task)
+            if not deferred:
+                break
+            pending = deferred
+        return [results[task.source_id] for task in tasks]

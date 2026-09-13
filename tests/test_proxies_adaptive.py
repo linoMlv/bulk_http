@@ -131,6 +131,7 @@ async def test_acquire_uses_current_rate_after_decrease() -> None:
         {"decrease_factor": 0.0},  # must be > 0
         {"increase_after": 0},  # must be >= 1
         {"increase_step": 0.0},  # must be > 0
+        {"max_attempts": 0},  # must be >= 1
         {"ban_failures": 0},  # must be >= 1
     ],
 )

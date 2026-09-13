@@ -338,9 +338,16 @@ except BanSuspectedError:
     print("stopped: target is banning us — rotate proxies, then re-run to resume")
 ```
 
-Adaptive rate combines with retries (§11): a 429 is both retried with backoff and
-used to lower the rate, so the campaign self-tunes toward zero sustained failures.
-Under `spawn`, each worker adapts its own rate independently.
+**Deferred replay (find the rate, then retry the 429s).** Rather than hammering
+a single request, adaptive mode makes **one attempt per pass**: the first pass
+lets the limiter converge on a sustainable rate while transient failures (429 or
+transport errors) are **set aside**. Once the pass finishes, the deferred tasks
+are **replayed** — now correctly paced at the converged rate — and this repeats
+until none remain, no progress is made, a ban is detected, or the `max_attempts`
+pass budget is reached. This drives residual 429s to zero without a per-request
+retry budget. Non-idempotent methods (POST/PUT/…) are not replayed unless
+`retry_non_idempotent=True`. Under `spawn`, each worker converges and retries
+within its own batches.
 
 ## 11. Timeouts and retries
 

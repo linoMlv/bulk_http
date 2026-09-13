@@ -28,8 +28,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   off by default) with crawl-delay.
 - Per-URL `total_timeout` budget spanning retries and backoffs.
 - Optional adaptive (AIMD) per-domain rate limiting that self-tunes toward a
-  sustainable rate and raises `BanSuspectedError` to stop when failures persist
-  at the minimum rate.
+  sustainable rate; transient failures are deferred and replayed in later passes
+  once the rate has converged, and `BanSuspectedError` stops the run when failures
+  persist at the minimum rate.
 - Opt-in HTTP/3 (availability-detected) and an opt-in winloop path.
 
 [0.1.0]: https://github.com/linoMlv/bulk_http/releases/tag/v0.1.0

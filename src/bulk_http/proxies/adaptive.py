@@ -36,6 +36,7 @@ class AdaptiveRateConfig:
     increase_after: int = 20
     decrease_factor: float = 0.5
     ban_failures: int = 10
+    max_attempts: int = 50
 
     def __post_init__(self) -> None:
         if not (0 < self.min_rate <= self.start_rate <= self.max_rate):
@@ -46,6 +47,8 @@ class AdaptiveRateConfig:
             raise ValueError("increase_after >= 1 and increase_step > 0")
         if self.ban_failures < 1:
             raise ValueError("ban_failures must be >= 1")
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be >= 1")
 
 
 class AdaptiveRateLimiter:
@@ -65,6 +68,10 @@ class AdaptiveRateLimiter:
         self._next: dict[str, float] = {}
         self._successes: dict[str, int] = {}
         self._fail_at_min: dict[str, int] = {}
+
+    @property
+    def max_attempts(self) -> int:
+        return self._c.max_attempts
 
     def rate(self, domain: str) -> float:
         return self._rate.get(domain, self._c.start_rate)

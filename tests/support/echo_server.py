@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import random
 import threading
 import time
 import zlib
@@ -101,6 +102,22 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, b"ok")
             else:
                 self._send(302, b"", extra_headers={"Location": f"/redirect/{remaining - 1}"})
+            return
+        if head == "big":
+            size = int(query.get("size", ["100000"])[0])
+            coding = query.get("encoding", ["identity"])[0]
+            # Poorly-compressible content so Stream-Cut actually truncates.
+            rng = random.Random(1234)
+            raw = b"MARKER" + rng.randbytes(max(0, size - 6))
+            if coding == "identity":
+                self._send(200, raw, "text/plain")
+            else:
+                self._send(
+                    200,
+                    _encode(coding, raw),
+                    "application/octet-stream",
+                    {"Content-Encoding": coding},
+                )
             return
         if head == "head-405":
             self._send(200, b"ok")

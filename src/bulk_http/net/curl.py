@@ -12,6 +12,7 @@ from curl_cffi.requests import AsyncSession
 
 from bulk_http._types import HttpVersion
 from bulk_http.config import ResolvedRequest
+from bulk_http.decompress import decompress_fragment
 from bulk_http.net.transport import RawResponse
 
 # A browser-consistent Accept-Encoding advertised to targets. curl's own
@@ -33,6 +34,11 @@ class CurlTransport:
     fragment is the raw wire body; the advertised ``Accept-Encoding`` is set
     explicitly to stay consistent with the impersonated profile. Decompression is
     handled downstream, which is what makes Stream-Cut's wire semantics possible.
+
+    Fast-Status aborts before reading any body; Stream-Cut reads until a byte
+    threshold (measured on the wire, or on the decoded content) and then aborts.
+    Both use a single, carefully-closed streaming path to avoid the historical
+    segfault on tearing down an interrupted response.
     """
 
     def __init__(self, session: AsyncSession[Any] | None = None) -> None:
@@ -48,24 +54,32 @@ class CurlTransport:
                 headers["Accept-Encoding"] = _IMPERSONATE_ACCEPT_ENCODING
         return headers
 
+    async def _request(self, resolved: ResolvedRequest, *, stream: bool) -> Any:
+        return await self._session.request(
+            resolved.method,
+            resolved.url,
+            headers=self._headers_for(resolved),
+            cookies=resolved.cookies,
+            content=resolved.body,
+            proxy=resolved.proxy,
+            timeout=resolved.timeout,
+            verify=resolved.verify_ssl,
+            impersonate=resolved.impersonate,  # type: ignore[arg-type]
+            accept_encoding=None,
+            allow_redirects=resolved.follow_redirects,
+            max_redirects=resolved.max_redirects,
+            http_version=_HTTP_VERSION_MAP[resolved.http_version],
+            stream=stream,
+        )
+
     async def perform(self, resolved: ResolvedRequest) -> RawResponse:
         start = time.monotonic()
         try:
-            response = await self._session.request(
-                resolved.method,
-                resolved.url,
-                headers=self._headers_for(resolved),
-                cookies=resolved.cookies,
-                content=resolved.body,
-                proxy=resolved.proxy,
-                timeout=resolved.timeout,
-                verify=resolved.verify_ssl,
-                impersonate=resolved.impersonate,  # type: ignore[arg-type]
-                accept_encoding=None,
-                allow_redirects=resolved.follow_redirects,
-                max_redirects=resolved.max_redirects,
-                http_version=_HTTP_VERSION_MAP[resolved.http_version],
-            )
+            if resolved.fast_status:
+                return await self._perform_fast_status(resolved, start)
+            if resolved.stream_cut is not None:
+                return await self._perform_stream_cut(resolved, start)
+            return await self._perform_full(resolved, start)
         except CurlError as error:
             return RawResponse(
                 status=None,
@@ -73,12 +87,59 @@ class CurlTransport:
                 error=type(error).__name__,
                 elapsed=time.monotonic() - start,
             )
+
+    async def _perform_full(self, resolved: ResolvedRequest, start: float) -> RawResponse:
+        response = await self._request(resolved, stream=False)
         return RawResponse(
             status=response.status_code,
             url=str(response.url),
             headers=dict(response.headers),
             fragment=response.content,
             content_encoding=response.headers.get("Content-Encoding"),
+            elapsed=time.monotonic() - start,
+        )
+
+    async def _perform_fast_status(self, resolved: ResolvedRequest, start: float) -> RawResponse:
+        response = await self._request(resolved, stream=True)
+        try:
+            return RawResponse(
+                status=response.status_code,
+                url=str(response.url),
+                headers=dict(response.headers),
+                fragment=b"",
+                content_encoding=response.headers.get("Content-Encoding"),
+                truncated=True,
+                elapsed=time.monotonic() - start,
+            )
+        finally:
+            await response.aclose()
+
+    async def _perform_stream_cut(self, resolved: ResolvedRequest, start: float) -> RawResponse:
+        threshold = resolved.stream_cut
+        assert threshold is not None
+        response = await self._request(resolved, stream=True)
+        content_encoding = response.headers.get("Content-Encoding")
+        buffer = bytearray()
+        truncated = False
+        try:
+            async for chunk in response.aiter_content():
+                buffer += chunk
+                if resolved.cut_on == "decoded":
+                    reached = len(decompress_fragment(bytes(buffer), content_encoding)) >= threshold
+                else:
+                    reached = len(buffer) >= threshold
+                if reached:
+                    truncated = True
+                    break
+        finally:
+            await response.aclose()
+        return RawResponse(
+            status=response.status_code,
+            url=str(response.url),
+            headers=dict(response.headers),
+            fragment=bytes(buffer),
+            content_encoding=content_encoding,
+            truncated=truncated,
             elapsed=time.monotonic() - start,
         )
 

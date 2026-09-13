@@ -166,6 +166,12 @@ process, concurrency is reached by scaling out worker processes rather than
 raising per-process concurrency; the reliable Selector loop is the default, with
 an opt-in `winloop` path pending validation.
 
+## Documentation
+
+A full, task-oriented guide — sources, filtering, concurrency, proxies, rate
+limiting, crash-safe resume, metrics, responsible use and troubleshooting — is in
+[docs/TUTORIAL.md](docs/TUTORIAL.md). Runnable scripts live in `examples/`.
+
 ## Development
 
 ```bash

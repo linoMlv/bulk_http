@@ -7,10 +7,12 @@ from typing import Any
 
 from bulk_http._types import (
     ACCEPT_ENCODINGS,
+    CTX_TYPES,
     CUT_ON_VALUES,
     HTTP_VERSIONS,
     METHODS,
     AcceptEncoding,
+    CtxType,
     CutOn,
     HttpVersion,
     Method,
@@ -92,3 +94,41 @@ class Task:
     def __post_init__(self) -> None:
         if self.source_id < 0:
             raise ValueError("source_id must be >= 0")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Result:
+    """A standardized output record for a validated (or failed) request."""
+
+    source_id: int
+    url: str
+    status: int | None
+    matched: bool
+    data: dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    elapsed: float | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EvalContext:
+    """The context object passed to a user predicate.
+
+    ``type`` selects which payload field is populated: ``data`` for JSON
+    (deserialized), ``dom`` for HTML (a parsed tree), ``text`` for anything
+    else. ``raw`` always holds the received (decompressed) fragment.
+    """
+
+    type: CtxType
+    status: int
+    url: str
+    headers: dict[str, str]
+    meta: dict[str, Any]
+    raw: bytes
+    data: Any | None = None
+    dom: Any | None = None
+    text: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.type not in CTX_TYPES:
+            raise ValueError(f"invalid context type: {self.type!r}")

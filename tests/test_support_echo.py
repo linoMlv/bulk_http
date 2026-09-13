@@ -3,6 +3,8 @@
 import json
 import urllib.request
 
+import pytest
+
 from tests.support.echo_server import EchoServer
 
 
@@ -119,3 +121,32 @@ def test_delay_route_waits() -> None:
         start = time.monotonic()
         _get(server.url + "/delay/0")
         assert time.monotonic() - start < 2.0
+
+
+def test_head_405_route_differs_between_head_and_get() -> None:
+    with EchoServer() as server:
+        get_status, get_body, _ = _get(server.url + "/head-405")
+        assert get_status == 200
+        assert get_body == b"ok"
+        head_req = urllib.request.Request(server.url + "/head-405", method="HEAD")
+        try:
+            urllib.request.urlopen(head_req)
+            raise AssertionError("expected 405 on HEAD")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 405
+
+
+def test_drop_route_closes_connection_abruptly() -> None:
+    import http.client
+
+    with (
+        EchoServer() as server,
+        pytest.raises((http.client.HTTPException, ConnectionError, OSError)),
+    ):
+        _get(server.url + "/drop")
+
+
+def test_slow_route_delivers_full_body() -> None:
+    with EchoServer() as server:
+        _, body, _ = _get_raw(server.url + "/slow?body=payload&chunks=4")
+        assert body == b"payload"

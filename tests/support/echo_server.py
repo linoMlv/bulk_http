@@ -102,7 +102,42 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send(302, b"", extra_headers={"Location": f"/redirect/{remaining - 1}"})
             return
+        if head == "head-405":
+            self._send(200, b"ok")
+            return
+        if head == "drop":
+            # Announce a body, then close the socket before sending it.
+            self.send_response(200)
+            self.send_header("Content-Length", "1000")
+            self.end_headers()
+            self.wfile.write(b"x" * 10)
+            self.wfile.flush()
+            self.connection.close()
+            return
+        if head == "slow":
+            payload = query.get("body", ["ok"])[0].encode()
+            chunks = int(query.get("chunks", ["2"])[0])
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            step = max(1, len(payload) // max(1, chunks))
+            for start in range(0, len(payload), step):
+                self.wfile.write(payload[start : start + step])
+                self.wfile.flush()
+                time.sleep(0.005)
+            return
         self._send(404, b"not found")
+
+    def do_HEAD(self) -> None:
+        split = urlsplit(self.path)
+        parts = [p for p in split.path.split("/") if p]
+        if parts and parts[0] == "head-405":
+            self._send(405)
+            return
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
 
 class EchoServer:

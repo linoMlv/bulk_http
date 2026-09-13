@@ -70,28 +70,42 @@ async def test_origin_error_is_neutral() -> None:
     assert lim.rate("a.com") == pytest.approx(10.0)
 
 
-async def test_ban_detected_at_min_rate_with_persistent_failures() -> None:
-    lim = _limiter(start_rate=2.0, min_rate=1.0, ban_window=5, ban_failures=5)
-    # Drive to the minimum, then keep failing until the window is saturated.
+async def test_ban_after_consecutive_failures_at_min_rate() -> None:
+    lim = _limiter(start_rate=1.0, min_rate=1.0, ban_failures=5)  # always at min
     with pytest.raises(BanSuspectedError):
-        for _ in range(10):
+        for _ in range(5):
+            lim.record("a.com", "rate_limited")
+
+
+async def test_descent_failures_do_not_trigger_ban() -> None:
+    # Failures while the rate is still above the minimum must not count for the ban.
+    lim = _limiter(start_rate=8.0, min_rate=1.0, decrease_factor=0.5, ban_failures=3)
+    # 8 -> 4 -> 2 -> 1 : three failures during descent, still above/at boundary.
+    lim.record("a.com", "rate_limited")  # was 8 (>min) -> 4
+    lim.record("a.com", "rate_limited")  # was 4 (>min) -> 2
+    lim.record("a.com", "rate_limited")  # was 2 (>min) -> 1 (min reached now)
+    assert lim.rate("a.com") == pytest.approx(1.0)  # no ban yet
+    # now three more failures *at* the minimum -> ban
+    with pytest.raises(BanSuspectedError):
+        for _ in range(3):
             lim.record("a.com", "rate_limited")
 
 
 async def test_no_ban_when_failures_below_threshold() -> None:
-    lim = _limiter(start_rate=1.0, min_rate=1.0, ban_window=10, ban_failures=8)
+    lim = _limiter(start_rate=1.0, min_rate=1.0, ban_failures=8)
     for _ in range(5):
-        lim.record("a.com", "rate_limited")  # 5 failures < 8 threshold
+        lim.record("a.com", "rate_limited")  # 5 < 8, at min but not enough
     assert lim.rate("a.com") == pytest.approx(1.0)
 
 
-async def test_recovery_success_resets_failure_streak() -> None:
-    lim = _limiter(start_rate=2.0, min_rate=1.0, ban_window=4, ban_failures=4, increase_after=100)
+async def test_success_at_min_resets_failure_streak() -> None:
+    lim = _limiter(start_rate=1.0, min_rate=1.0, ban_failures=3, increase_after=100)
     lim.record("a.com", "rate_limited")
     lim.record("a.com", "rate_limited")
-    lim.record("a.com", "ok")  # window now has a success, not all failures
+    lim.record("a.com", "ok")  # resets the at-min failure streak
     lim.record("a.com", "rate_limited")
-    lim.record("a.com", "rate_limited")  # 4 in window but one is ok -> no ban
+    lim.record("a.com", "rate_limited")  # only 2 consecutive at-min failures -> no ban
+    assert lim.rate("a.com") == pytest.approx(1.0)
 
 
 async def test_acquire_uses_current_rate_after_decrease() -> None:
@@ -117,9 +131,7 @@ async def test_acquire_uses_current_rate_after_decrease() -> None:
         {"decrease_factor": 0.0},  # must be > 0
         {"increase_after": 0},  # must be >= 1
         {"increase_step": 0.0},  # must be > 0
-        {"ban_window": 0},  # must be >= 1
         {"ban_failures": 0},  # must be >= 1
-        {"ban_failures": 5, "ban_window": 3},  # failures <= window violated
     ],
 )
 def test_adaptive_config_rejects_invalid_values(kwargs: dict[str, object]) -> None:

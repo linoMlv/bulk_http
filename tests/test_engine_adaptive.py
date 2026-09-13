@@ -39,7 +39,7 @@ def test_persistent_failures_stop_the_campaign_with_ban_error(tmp_path: Path) ->
         workers=1,
         chunk_size=10,
         adaptive_rate=AdaptiveRateConfig(
-            start_rate=1000.0, min_rate=1000.0, max_rate=1000.0, ban_window=3, ban_failures=3
+            start_rate=1000.0, min_rate=1000.0, max_rate=1000.0, ban_failures=3
         ),
     )
     executor = InProcessExecutor(

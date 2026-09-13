@@ -322,7 +322,8 @@ engine = Engine(
 ```
 
 **Ban detection / stop.** If the rate has already fallen to `min_rate` and
-failures still dominate the window, a real IP ban is likely — continuing would be
+failures still keep coming (``ban_failures`` in a row at the floor — failures
+during the descent don't count), a real IP ban is likely — continuing would be
 pointless (or harmful). The engine raises `BanSuspectedError`, which stops the
 campaign. Because output is checkpointed, you can fix the situation (rotate IPs,
 wait) and resume:

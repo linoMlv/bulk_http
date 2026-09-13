@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -36,8 +35,7 @@ class AdaptiveRateConfig:
     increase_step: float = 1.0
     increase_after: int = 20
     decrease_factor: float = 0.5
-    ban_window: int = 30
-    ban_failures: int = 20
+    ban_failures: int = 10
 
     def __post_init__(self) -> None:
         if not (0 < self.min_rate <= self.start_rate <= self.max_rate):
@@ -46,8 +44,8 @@ class AdaptiveRateConfig:
             raise ValueError("decrease_factor must be in (0, 1)")
         if self.increase_after < 1 or self.increase_step <= 0:
             raise ValueError("increase_after >= 1 and increase_step > 0")
-        if self.ban_window < 1 or not (1 <= self.ban_failures <= self.ban_window):
-            raise ValueError("require 1 <= ban_failures <= ban_window")
+        if self.ban_failures < 1:
+            raise ValueError("ban_failures must be >= 1")
 
 
 class AdaptiveRateLimiter:
@@ -66,7 +64,7 @@ class AdaptiveRateLimiter:
         self._rate: dict[str, float] = {}
         self._next: dict[str, float] = {}
         self._successes: dict[str, int] = {}
-        self._window: dict[str, deque[bool]] = {}
+        self._fail_at_min: dict[str, int] = {}
 
     def rate(self, domain: str) -> float:
         return self._rate.get(domain, self._c.start_rate)
@@ -82,18 +80,23 @@ class AdaptiveRateLimiter:
             await self._sleep(wait)
 
     def record(self, domain: str, outcome: str) -> None:
-        failure = outcome in _FAILURE_OUTCOMES
-        window = self._window.setdefault(domain, deque(maxlen=self._c.ban_window))
-        window.append(failure)
-        if failure:
+        if outcome in _FAILURE_OUTCOMES:
             self._successes[domain] = 0
-            new_rate = max(self._c.min_rate, self.rate(domain) * self._c.decrease_factor)
-            self._rate[domain] = new_rate
-            if new_rate <= self._c.min_rate and sum(window) >= self._c.ban_failures:
-                raise BanSuspectedError(
-                    f"failures persist for {domain!r} at the minimum rate; stopping"
-                )
+            already_at_min = self.rate(domain) <= self._c.min_rate
+            self._rate[domain] = max(self._c.min_rate, self.rate(domain) * self._c.decrease_factor)
+            if already_at_min:
+                # Only failures that happen *after* we are already at the floor
+                # count toward a ban; failures during the descent do not.
+                streak = self._fail_at_min.get(domain, 0) + 1
+                self._fail_at_min[domain] = streak
+                if streak >= self._c.ban_failures:
+                    raise BanSuspectedError(
+                        f"failures persist for {domain!r} at the minimum rate; stopping"
+                    )
+            else:
+                self._fail_at_min[domain] = 0
         elif outcome == "ok":
+            self._fail_at_min[domain] = 0
             streak = self._successes.get(domain, 0) + 1
             if streak >= self._c.increase_after:
                 self._rate[domain] = min(

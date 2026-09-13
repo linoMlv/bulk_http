@@ -85,7 +85,10 @@ class Engine:
             )
 
     def _default_executor(
-        self, out_dir: str | os.PathLike[str], predicate: Predicate | None
+        self,
+        out_dir: str | os.PathLike[str],
+        predicate: Predicate | None,
+        proxies: list[str] | None = None,
     ) -> Executor:
         import platform
         import sys
@@ -94,6 +97,7 @@ class Engine:
         from bulk_http.engine.executor import InProcessExecutor
         from bulk_http.engine.spawn import SpawnExecutor
         from bulk_http.net.curl import CurlTransport
+        from bulk_http.proxies import DomainRateLimiter, ProxyPool
 
         os_name = "windows" if sys.platform.startswith("win") else platform.system().lower()
         workers = resolve_workers(self._config.workers, os_name=os_name, cpu_count=os.cpu_count())
@@ -102,8 +106,19 @@ class Engine:
             return CurlTransport()
 
         if workers <= 1:
+            pool = ProxyPool(proxies) if proxies else None
+            limiter = (
+                DomainRateLimiter(self._config.per_domain_rate_limit)
+                if self._config.per_domain_rate_limit is not None
+                else None
+            )
             return InProcessExecutor(
-                self._config, out_dir, transport_factory=factory, predicate=predicate
+                self._config,
+                out_dir,
+                transport_factory=factory,
+                predicate=predicate,
+                proxy_pool=pool,
+                rate_limiter=limiter,
             )
         return SpawnExecutor(
             self._config,
@@ -113,6 +128,8 @@ class Engine:
             workers=workers,
             in_flight_batches=self._config.in_flight_batches,
             max_tasks_per_child=self._config.max_tasks_per_child,
+            proxies=proxies,
+            per_domain_rate_limit=self._config.per_domain_rate_limit,
         )
 
     def run(
@@ -122,6 +139,7 @@ class Engine:
         predicate: Predicate | None = None,
         out_dir: str | os.PathLike[str] = "out",
         needle: str | None = None,
+        proxies: list[str] | None = None,
         executor: Executor | None = None,
     ) -> RunSummary:
         compliance = self._compliance()
@@ -152,7 +170,7 @@ class Engine:
                     message.chunk_id, message.worker_file, message.offset, message.count
                 )
 
-        active_executor = executor or self._default_executor(out_dir, predicate)
+        active_executor = executor or self._default_executor(out_dir, predicate, proxies)
         try:
             active_executor.execute(distributed(), on_control)
         finally:

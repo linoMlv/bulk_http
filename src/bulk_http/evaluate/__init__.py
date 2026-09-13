@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bulk_http.evaluate.patterns import PatternMatcher
 from bulk_http.evaluate.status import status_matches
 
-__all__ = ["status_matches"]
+__all__ = ["PatternMatcher", "status_matches"]
